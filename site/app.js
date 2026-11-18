@@ -6,7 +6,7 @@ const state = { index: [], meta: null, engine: null, near: null, shards: new Map
 const SOURCE = "https://data.cityofchicago.org/Health-Human-Services/Food-Inspections/4ijn-s7e5";
 // Feedback form (Tally). Hidden fields place_id / place_name / page are pre-filled from the link.
 // Empty -> falls back to GitHub issues.
-const FEEDBACK_FORM = "";
+const FEEDBACK_FORM = "https://tally.so/r/4a79bo";
 const ISSUES = "https://github.com/marco318/chicago-food-inspections/issues/new";
 const feedbackUrl = (p = null) => {
   if (!FEEDBACK_FORM) return ISSUES;
@@ -18,7 +18,7 @@ const feedbackLink = (p, text) => `<a href="${esc(feedbackUrl(p))}" target="_bla
 
 // Usage counting (GoatCounter: no cookies, no personal data). Empty -> nothing is sent.
 // Counts page views per route and a few events; never sends what people type into search.
-const GOATCOUNTER = "";   // e.g. "https://NAME.goatcounter.com/count"
+const GOATCOUNTER = "https://myunghoonkim.goatcounter.com/count";
 if (GOATCOUNTER && !/^(localhost|127\.)/.test(location.hostname)) {
   window.goatcounter = { no_onload: true };
   const s = document.createElement("script");
