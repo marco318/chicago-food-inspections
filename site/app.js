@@ -14,7 +14,28 @@ const feedbackUrl = (p = null) => {
   if (p) { q.set("place_id", p.id); q.set("place_name", p.n); }
   return `${FEEDBACK_FORM}?${q}`;
 };
-const feedbackLink = (p, text) => `<a href="${esc(feedbackUrl(p))}" target="_blank" rel="noopener">${text}</a>`;
+const feedbackLink = (p, text) => `<a href="${esc(feedbackUrl(p))}" target="_blank" rel="noopener" data-track="feedback-click">${text}</a>`;
+
+// Usage counting (GoatCounter: no cookies, no personal data). Empty -> nothing is sent.
+// Counts page views per route and a few events; never sends what people type into search.
+const GOATCOUNTER = "";   // e.g. "https://NAME.goatcounter.com/count"
+if (GOATCOUNTER && !/^(localhost|127\.)/.test(location.hostname)) {
+  window.goatcounter = { no_onload: true };
+  const s = document.createElement("script");
+  s.async = true; s.src = "https://gc.zgo.at/count.js"; s.dataset.goatcounter = GOATCOUNTER;
+  s.onload = () => track(routePath());
+  document.head.appendChild(s);
+}
+function track(path, event = false) {
+  try { window.goatcounter?.count?.({ path, title: event ? path : document.title, event }); } catch {}
+}
+const routePath = () => (location.hash.replace(/^#/, "") || "/").replace(/\/i\/\d+$/, "/inspection");
+document.addEventListener("click", (e) => { const a = e.target.closest("[data-track]"); if (a) track(a.dataset.track, true); });
+let searchTimer;
+function trackSearch(n) {   // one event per pause in typing, not per keystroke
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => track(n ? "search" : "search-no-results", true), 1500);
+}
 
 // ---------- helpers ----------
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -49,7 +70,7 @@ function renderHome() {
         <label for="q" class="muted small">Find a restaurant, café or store</label>
         <input id="q" type="search" autocomplete="off" placeholder="Name or address, like Lou Malnati's" value="${esc(state.query)}">
         <div class="row-tools">
-          <button class="chip" id="near" aria-pressed="${!!state.near}">Near me</button>
+          <button class="chip" id="near" aria-pressed="${!!state.near}" data-track="near-me">Near me</button>
           <span id="count"></span>
         </div>
       </div>
@@ -69,6 +90,7 @@ function renderResults() {
   if (state.query.trim()) {
     rows = search(state.engine, state.query, { near: state.near });
     label = rows.length ? `${rows.length >= 30 ? "Top 30" : rows.length} results` : "No matches. Try fewer words or part of the address.";
+    trackSearch(rows.length);
   } else if (state.near) {
     rows = state.index.filter((p) => p.open && p.ll).map((p) => ({ ...p, km: distanceKm(state.near, p.ll) }))
       .sort((a, b) => a.km - b.km).slice(0, 30);
@@ -183,6 +205,7 @@ function renderAbout() {
       <li><strong>Limits:</strong> a new owner with a new license can look like a new opening; a place that changed its name under the same license is shown as a new place.</li>
     </ul>
     <p>Found a mistake, own a business listed here, or have an idea? ${feedbackLink(null, "Send feedback")}. An email address is optional and only used to reply.</p>
+    <p class="small muted">Privacy: no cookies, no accounts. We count anonymous page views and how often search is used (not what you type) to see whether this is useful. "Near me" uses your location only on your device.</p>
     <p class="small muted">Code and method: <a href="https://github.com/marco318/chicago-food-inspections" target="_blank" rel="noopener">GitHub</a>.</p></div>`;
 }
 
@@ -204,7 +227,7 @@ function route() {
     Object.assign(state, { meta, index, engine: buildSearch(MiniSearch, index) });
     document.getElementById("foot").innerHTML =
       `Data through ${fmtDate(meta.data_through)} · Source: City of Chicago · Not affiliated with the City · <a href="#/about">How this works</a>`;
-    window.addEventListener("hashchange", () => { if (!location.hash.startsWith("#/p")) app.innerHTML = ""; route(); window.scrollTo(0, 0); });
+    window.addEventListener("hashchange", () => { if (!location.hash.startsWith("#/p")) app.innerHTML = ""; route(); window.scrollTo(0, 0); track(routePath()); });
     route();
   } catch (e) {
     app.innerHTML = `<p>Couldn't load the data. Try reloading the page.</p>`;
