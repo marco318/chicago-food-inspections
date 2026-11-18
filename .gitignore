@@ -1,0 +1,6 @@
+data/
+.venv/
+.env
+tools/node_modules/
+site/data/
+__pycache__/
