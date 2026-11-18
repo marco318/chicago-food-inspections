@@ -11,6 +11,10 @@ labeled priority / priority foundation ~95% of the time; most of 30-58 carry no 
 Usage: .venv/bin/python scripts/10_export.py data/processed site/data
 """
 import json
+import os
+from datetime import datetime, timezone
+from email.utils import format_datetime
+from xml.sax.saxutils import escape as xml_escape
 import math
 import re
 import sys
@@ -24,9 +28,12 @@ SHARDS = 128
 
 pl = pd.read_csv(D / "places.csv", dtype={"zip": "string"}, parse_dates=["first_seen", "last_seen"])
 pl = pl[pl.consumer_facing].copy()
+COLS = ["inspection_id", "place_id", "inspection_date", "itype", "results", "is_inspection", "is_complaint",
+        "dba_name", "aka_name", "posted_at"]
 ins = pd.read_csv(D / "inspections_clean.csv", parse_dates=["inspection_date"], low_memory=False,
-                  usecols=["inspection_id", "place_id", "inspection_date", "itype", "results", "is_inspection",
-                           "is_complaint", "dba_name", "aka_name"])
+                  usecols=lambda c: c in COLS)
+ins["posted"] = (pd.to_datetime(ins["posted_at"], utc=True).dt.tz_convert("America/Chicago").dt.tz_localize(None)
+                 if "posted_at" in ins else ins.inspection_date)
 ins = ins[ins.place_id.isin(pl.place_id)]
 vio = pd.read_csv(D / "violations.csv")
 vio = vio[vio.place_id.isin(pl.place_id)]
@@ -89,9 +96,18 @@ sev[c.str.contains(r"PRIORITY\s+FOUNDATION|\bPF\b")] = "priority_foundation"
 sev[c.str.contains(r"PRIORITY\s+VIOLATION|PRIORITY\.|PRIORITY\s*\(P\)|\(P\)") & ~c.str.contains(r"PRIORITY\s+FOUNDATION")] = "priority"
 vio["sev"] = sev.fillna(vio.number.map(lambda n: "risk_factor" if n <= 29 else "upkeep"))
 
+# pests per inspection = AI flag OR pest evidence in the inspector's #38 notes (same rule as 09_merge_summaries)
+PEST_SEEN = r"DROPPING|\bLIVE\b|\bDEAD\b|CARCASS|INFEST|ROACHES|\bGNATS\b|\bFLIES\b|NESTING|GNAWED|RUB MARKS"
+pest_ids = set(vio[(vio.number == 38) & c.str.contains(PEST_SEEN, regex=True)].inspection_id)
+if "pests" in summ:
+    pest_ids |= set(summ[summ.pests.astype(bool)].inspection_id)
+CLOSURE = r"SUMMARILY SUSPENDED|SUMMARY SUSPENSION|LICENSE (?:WAS |IS )?SUSPENDED|CEASE AND DESIST|CLOSED BY|ESTABLISHMENT CLOSED|CLOSURE"
+closure_ids = set(vio[c.str.contains(CLOSURE, regex=True)].inspection_id)
+priority_ids = set(vio[vio.sev.eq("priority")].inspection_id)
+
 # ---------- index rows ----------
 pl = pl.merge(sc, on="place_id", how="left")
-last_real = ins[ins.is_inspection].sort_values("inspection_date").groupby("place_id").tail(1).set_index("place_id")
+last_real = ins[ins.is_inspection].sort_values(["inspection_date", "inspection_id"]).groupby("place_id").tail(1).set_index("place_id")
 index = []
 for r in pl.itertuples():
     lr = last_real.loc[r.place_id] if r.place_id in last_real.index else None
@@ -102,7 +118,8 @@ for r in pl.itertuples():
         "z": r.zip if isinstance(r.zip, str) else "",
         "t": title_case(r.facility_type),
         "open": not bool(r.out_of_business),
-        "last": [lr.inspection_date.strftime("%Y-%m-%d"), lr.results] if lr is not None else None,
+        "last": ([lr.inspection_date.strftime("%Y-%m-%d"), lr.results, int(lr.inspection_id in pest_ids)]
+                 if lr is not None else None),
     }
     legal = display_name(r.legal_name)
     if legal.lower() != row["n"].lower():
@@ -145,13 +162,100 @@ for pid, g in ins.sort_values("inspection_date", ascending=False).groupby("place
     }
     shards[pid % SHARDS][str(pid)] = detail
 
+# ---------- findings feed: inspections newly posted by the city in the last 7 days ----------
+# kinds, most serious first. "fixed" = a passed re-inspection right after a fail.
+RANK = {"poison": 0, "closure": 1, "pests": 2, "priority": 3, "fail": 4, "fixed": 5}
+FALLBACK = {"poison": "Suspected food poisoning check", "closure": "Closure or suspension noted",
+            "pests": "Signs of pests found", "fixed": "Fixed: passed re-inspection"}
+# Plain words for the violations that most often drive a fail (used when there's no AI summary yet).
+PLAIN = {1: "No one in charge knew food safety rules", 2: "No certified food manager on site",
+         3: "Sick-worker policy missing", 5: "No plan for vomit/diarrhea cleanup", 8: "Hands not washed properly",
+         9: "Bare-hand contact with ready-to-eat food", 10: "Hand sink not usable or stocked",
+         11: "Food from an unapproved source", 13: "Raw and ready-to-eat food not kept apart",
+         16: "Dishes or surfaces not properly sanitized", 18: "Food not cooled properly",
+         19: "Food not reheated properly", 20: "Hot food not kept hot enough", 21: "Hot food not kept hot enough",
+         22: "Cold food not kept cold enough", 23: "Food missing discard dates", 25: "Consumer advisory missing",
+         29: "Special process without approval", 33: "Food not thawed or cooled correctly",
+         36: "Thermometers missing", 37: "Food not labeled", 38: "Pest problems", 39: "Food not protected from contamination",
+         47: "Equipment in poor repair", 48: "Dishwashing setup not working right",
+         59: "Earlier problems not fixed", 60: "Earlier problems not fixed", 61: "Earlier problems not fixed", 49: "Surfaces not clean", 51: "Plumbing problems", 55: "Facility not clean or maintained"}
+
+
+def pest_phrase(text: str) -> str:
+    t = text.upper()
+    what = []
+    if re.search(r"ROACH", t): what.append("roaches")
+    if re.search(r"\bMICE\b|\bMOUSE\b|RODENT DROPP|MICE DROPP|MOUSE DROPP", t): what.append("mouse droppings" if "DROPP" in t else "mice")
+    elif re.search(r"\bRATS?\b", t): what.append("rats")
+    if re.search(r"\bFLIES\b|\bFLY\b|GNAT", t): what.append("flies")
+    if not what: return "Signs of pests found"
+    s = " and ".join(what[:2])
+    return (s[0].upper() + s[1:] + " found")
+
+
+by_id = {r["id"]: r for r in index}
+real = ins[ins.is_inspection & ins.place_id.isin(by_id)].sort_values(["place_id", "inspection_date", "inspection_id"])
+real["prev_res"] = real.groupby("place_id").results.shift(1)
+real["next_res"] = real.groupby("place_id").results.shift(-1)
+real["next_d"] = real.groupby("place_id").inspection_date.shift(-1)
+cut = real.posted.max() - pd.Timedelta(days=7)
+passes = {pid: sorted(g.inspection_date) for pid, g in real[real.results.str.startswith("Pass")].groupby("place_id")}
+feed = []
+for r in real[real.posted > cut].itertuples():
+    fail = r.results == "Fail"
+    if "FOOD POISONING" in r.itype: kind = "poison"
+    elif r.inspection_id in closure_ids: kind = "closure"
+    elif r.inspection_id in pest_ids and r.results != "Pass": kind = "pests"
+    elif fail and r.inspection_id in priority_ids: kind = "priority"
+    elif fail: kind = "fail"
+    elif "RE-INSPECTION" in r.itype and r.prev_res == "Fail": kind = "fixed"
+    else: continue
+    head = None
+    if kind != "fixed" and r.inspection_id in summ.index:
+        head = summ.loc[r.inspection_id].headline
+    if not head:
+        vg = vio_by.get(r.inspection_id)
+        if kind == "pests" and vg is not None:
+            head = pest_phrase(" ".join(vg.comment.fillna("")))
+        elif kind in ("priority", "fail") and vg is not None:
+            order = {"priority": 0, "priority_foundation": 1, "risk_factor": 2, "core": 3, "upkeep": 4}
+            w = vg.assign(o=vg.sev.map(order)).sort_values("o").iloc[0]
+            head = PLAIN.get(int(w.number)) or title_case(w.title)
+        head = head or FALLBACK.get(kind) or "Failed inspection"
+    fixed = None
+    if kind != "fixed":   # any later passing inspection counts as fixed (not just the very next one)
+        later = passes.get(r.place_id, [])
+        nxt = next((d for d in later if d > r.inspection_date), None)
+        fixed = nxt.strftime("%Y-%m-%d") if nxt is not None else None
+    pr = by_id[r.place_id]
+    feed.append({"id": int(r.place_id), "iid": int(r.inspection_id), "n": pr["n"],
+                 "st": re.sub(r"^\d+(-\d+)?\s+", "", pr["a"]), "d": r.inspection_date.strftime("%Y-%m-%d"),
+                 "p": r.posted.strftime("%Y-%m-%d"), "res": r.results, "k": kind, "h": str(head), "fx": fixed})
+# newest posting day first; within a day, open problems before already-fixed ones, then by seriousness
+feed.sort(key=lambda f: (f["p"], f["fx"] is None, -RANK[f["k"]]), reverse=True)
+(OUT / "feed.json").write_text(json.dumps(feed, separators=(",", ":")))
+
+SITE = os.environ.get("SITE_URL", "https://marco318.github.io/chicago-food-inspections/")
+items = "".join(
+    f"<item><title>{xml_escape(f['n'])}: {xml_escape(f['h'])}</title>"
+    f"<link>{SITE}#/p/{f['id']}/i/{f['iid']}</link><guid isPermaLink=\"false\">{f['iid']}</guid>"
+    f"<pubDate>{format_datetime(datetime.strptime(f['p'], '%Y-%m-%d').replace(tzinfo=timezone.utc))}</pubDate>"
+    f"<description>{xml_escape(f['res'])}, inspected {f['d']}. Unofficial summary of City of Chicago records.</description></item>"
+    for f in feed[:100])
+(OUT / "feed.xml").write_text(
+    '<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel>'
+    "<title>New findings: Chicago food inspections (unofficial)</title>"
+    f"<link>{SITE}</link><description>Inspections newly posted by the City of Chicago with pests, failed "
+    "results, closures or fixes. Unofficial; not affiliated with the City.</description>" + items + "</channel></rss>")
+
 for k, sh in enumerate(shards):
     (OUT / "places" / f"{k}.json").write_text(json.dumps(sh, separators=(",", ":")))
 (OUT / "index.json").write_text(json.dumps(index, separators=(",", ":")))
 meta = {"data_through": ins.inspection_date.max().strftime("%Y-%m-%d"),
         "window_start": ins.inspection_date.min().strftime("%Y-%m-%d"),
         "places": len(index), "flagged": sum("flag" in r for r in index),
-        "summarized": int(len(summ)), "inspections": int(len(ins)), "shards": SHARDS}
+        "summarized": int(len(summ)), "inspections": int(len(ins)), "shards": SHARDS,
+        "posted_through": real.posted.max().strftime("%Y-%m-%d"), "feed": len(feed)}
 (OUT / "meta.json").write_text(json.dumps(meta, indent=1))
 
 size_idx = (OUT / "index.json").stat().st_size / 1e6
@@ -160,3 +264,4 @@ print(meta)
 print(f"index.json {size_idx:.2f} MB | shards total {size_sh:.1f} MB (avg {size_sh / SHARDS * 1000:.0f} KB)")
 print("severity mix:", vio.sev.value_counts().to_dict())
 print("name samples:", [r["n"] for r in index[:12]])
+print("feed kinds:", pd.Series([f["k"] for f in feed]).value_counts().to_dict())

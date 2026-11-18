@@ -14,7 +14,7 @@ out = Path(sys.argv[1])
 out.parent.mkdir(parents=True, exist_ok=True)
 start = (dt.date.today() - dt.timedelta(days=3 * 365 + 1)).isoformat()
 cols = ("inspection_id,dba_name,aka_name,license_,facility_type,risk,address,city,state,zip,"
-        "inspection_date,inspection_type,results,violations,latitude,longitude")
+        "inspection_date,inspection_type,results,violations,latitude,longitude,:created_at as posted_at")
 q = urllib.parse.urlencode({"$select": cols, "$where": f"inspection_date>='{start}'",
                             "$order": "inspection_date", "$limit": 500000})
 req = urllib.request.Request(f"https://data.cityofchicago.org/resource/4ijn-s7e5.csv?{q}",
