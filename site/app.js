@@ -4,6 +4,17 @@ import { buildSearch, search, distanceKm } from "./search.js";
 const app = document.getElementById("app");
 const state = { index: [], meta: null, engine: null, near: null, shards: new Map(), query: "" };
 const SOURCE = "https://data.cityofchicago.org/Health-Human-Services/Food-Inspections/4ijn-s7e5";
+// Feedback form (Tally). Hidden fields place_id / place_name / page are pre-filled from the link.
+// Empty -> falls back to GitHub issues.
+const FEEDBACK_FORM = "";
+const ISSUES = "https://github.com/marco318/chicago-food-inspections/issues/new";
+const feedbackUrl = (p = null) => {
+  if (!FEEDBACK_FORM) return ISSUES;
+  const q = new URLSearchParams({ page: location.href });
+  if (p) { q.set("place_id", p.id); q.set("place_name", p.n); }
+  return `${FEEDBACK_FORM}?${q}`;
+};
+const feedbackLink = (p, text) => `<a href="${esc(feedbackUrl(p))}" target="_blank" rel="noopener">${text}</a>`;
 
 // ---------- helpers ----------
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -129,7 +140,8 @@ async function renderPlace(id) {
       <li><a href="#/p/${id}/i/${i.id}">
         <div class="line1"><span>${fmtDate(i.d)} · <span class="sub">${esc(i.ty)}${i.c && !/complaint/i.test(i.ty) ? " (complaint)" : ""}</span></span>${pill(i.res)}</div>
         <div class="sub">${i.h ? esc(i.h) : i.v ? `${i.v.length} violation${i.v.length > 1 ? "s" : ""}` : "No violations recorded"}${i.pests ? " · pests found" : ""}</div>
-      </a></li>`).join("")}</ul>`;
+      </a></li>`).join("")}</ul>
+    <p class="small muted">Something wrong here, or is this your business? ${feedbackLink(p, "Tell us")}.</p>`;
 }
 
 // ---------- inspection detail ----------
@@ -152,7 +164,8 @@ async function renderInspection(id, iid) {
         ${comment ? `<details><summary>Inspector's notes</summary><p class="orig">${esc(sentence(comment))}</p></details>` : ""}
       </div>`).join("")}</div>` : `<p class="muted">No violations recorded.</p>`}
     <p class="small muted">Public record from the <a href="${SOURCE}" target="_blank" rel="noopener">City of Chicago data portal</a>.
-      Conditions may have changed since this date. Notes shown with case adjusted for reading.</p>`;
+      Conditions may have changed since this date. Notes shown with case adjusted for reading.
+      ${feedbackLink(p, "Report a problem with this page")}.</p>`;
 }
 
 // ---------- about ----------
@@ -168,7 +181,9 @@ function renderAbout() {
       <li><strong>The ▲ badge:</strong> marks places with clearly more complaint-driven inspections than similar places (same type and risk level, same zip code), allowing for how long each place has been open. ${m.flagged} places (about 3%). Complaints are reports from the public, not findings; a badge is a reason to look at the record, not proof of a problem. In our check, badged places went on to fail routine inspections somewhat more often (34% vs 23%) and drew more complaints the next year.</li>
       <li><strong>Severity:</strong> labels like "Priority" come from the inspector's notes. When none is written, items 1–29 are shown as "Risk factor" and the rest as "Upkeep".</li>
       <li><strong>Limits:</strong> a new owner with a new license can look like a new opening; a place that changed its name under the same license is shown as a new place.</li>
-    </ul></div>`;
+    </ul>
+    <p>Found a mistake, own a business listed here, or have an idea? ${feedbackLink(null, "Send feedback")}. An email address is optional and only used to reply.</p>
+    <p class="small muted">Code and method: <a href="https://github.com/marco318/chicago-food-inspections" target="_blank" rel="noopener">GitHub</a>.</p></div>`;
 }
 
 function notFound() { app.innerHTML = `<a class="back" href="#/">← Search</a><p>That page doesn't exist.</p>`; }
