@@ -137,3 +137,10 @@ details.all > summary { cursor: pointer; list-style: none; color: var(--accent);
 a.chip { font-size: 14px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--border); color: var(--text); text-decoration: none; }
 a.chip[aria-current="true"] { border-color: var(--accent); color: var(--accent); background: var(--surface); }
 .day { margin: 16px 0 0; font-size: 13px; font-weight: 600; color: var(--muted); }
+
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.topbar .back { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.share { flex: none; font: inherit; font-size: 14px; padding: 5px 14px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--border); background: transparent; color: var(--text); }
+button.share:hover { border-color: var(--text); }
+button.share.done { color: var(--ok); border-color: currentColor; }

@@ -37,6 +37,26 @@ function trackSearch(n) {   // one event per pause in typing, not per keystroke
   searchTimer = setTimeout(() => track(n ? "search" : "search-no-results", true), 1500);
 }
 
+// ---------- share ----------
+// Hash URLs are already deep links; this just hands the current one to the phone's share sheet, or copies it.
+const shareBtn = (kind, title) => `<button class="share" data-share="${kind}" data-title="${esc(title)}" type="button">Share</button>`;
+const topBar = (backHref, backText, kind, title) =>
+  `<div class="topbar"><a class="back" href="${backHref}">${backText}</a>${shareBtn(kind, title)}</div>`;
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-share]");
+  if (!b) return;
+  const url = location.href, title = b.dataset.title;
+  track(`share-${b.dataset.share}`, true);
+  if (navigator.share && matchMedia("(pointer: coarse)").matches) {
+    try { await navigator.share({ title, text: title, url }); } catch {}   // user closed the sheet: nothing to do
+    return;
+  }
+  try { await navigator.clipboard.writeText(url); }
+  catch { const t = document.createElement("textarea"); t.value = url; document.body.appendChild(t); t.select(); document.execCommand("copy"); t.remove(); }
+  b.textContent = "Link copied ✓"; b.classList.add("done");
+  setTimeout(() => { b.textContent = "Share"; b.classList.remove("done"); }, 2000);
+});
+
 // ---------- helpers ----------
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const RESULT = {
@@ -201,7 +221,7 @@ async function renderPlace(id) {
   const said = latest && (latest.s || (latest.v
     ? [...new Set(latest.v.map((v) => v[1]))].slice(0, 2).join("; ") : "No violations recorded."));
   app.innerHTML = `
-    <a class="back" href="#/">← Back</a>
+    ${topBar("#/", "← Back", "place", `${p.n} · Chicago food inspections`)}
     <h1>${esc(p.n)}</h1>
     <div class="muted small">${esc(p.a)} · ${esc(p.t)}${p.pv ? ` · formerly ${esc(p.pv)}` : ""}</div>
     ${p.open ? "" : `<div class="banner">The city marked this place out of business.</div>`}
@@ -243,7 +263,7 @@ async function renderInspection(id, iid) {
   if (!i) return notFound();
   document.title = `${p.n} · ${fmtDate(i.d)}`;
   app.innerHTML = `
-    <a class="back" href="#/p/${id}">← ${esc(p.n)}</a>
+    ${topBar(`#/p/${id}`, `← ${esc(p.n)}`, "inspection", `${p.n} · ${fmtDate(i.d)} inspection: ${i.res}${i.h ? ` · ${i.h}` : ""}`)}
     <h1>${fmtDate(i.d)} ${pill(i.res)}</h1>
     <div class="muted small">${esc(i.ty)}${i.c ? " · triggered by a complaint" : ""} · Inspection #${i.id}</div>
     ${i.s ? `<div class="card"><strong>${esc(i.h)}</strong><p>${esc(i.s)}</p>
