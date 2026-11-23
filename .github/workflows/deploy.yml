@@ -50,7 +50,17 @@ jobs:
       - name: Install Claude Code (for AI summaries)
         id: ai
         if: env.HAS_TOKEN == 'true' && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
-        run: npm install -g @anthropic-ai/claude-code && echo "run=1" >> "$GITHUB_OUTPUT"
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          npm install -g @anthropic-ai/claude-code@2.1.327   # pinned; bump on purpose
+          # one tiny call to check the token before the real work; an expired token shows up here, not as silence
+          if (cd "$(mktemp -d)" && claude -p --model haiku --tools "" --strict-mcp-config --no-session-persistence "Reply with OK" | grep -qi ok); then
+            echo "run=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning title=Claude login failed::Token missing, expired or revoked. Rule-based summaries only; run 'claude setup-token' and update the CLAUDE_CODE_OAUTH_TOKEN secret."
+            echo "run=0" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Rebuild site data (pull, model, summaries, gate)
         id: build
