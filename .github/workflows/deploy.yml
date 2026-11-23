@@ -1,14 +1,25 @@
 name: Build and deploy
 
+# Daily: pull city data -> AI summaries for new inspections (Claude, via CLAUDE_CODE_OAUTH_TOKEN) -> rule-based
+# summaries for anything left -> build + tests -> gate. The gate deploys only when every inspection has an AI
+# summary, or when one has waited 3+ days (then rule-based ships). Otherwise the live site stays as it was and
+# the build is kept as a downloadable preview artifact.
+# dev branch: build + tests only (AI step only on manual runs, never commits, never deploys).
+
 on:
   schedule:
-    - cron: "0 12 * * *"        # daily, 6–7 AM Chicago time
+    - cron: "0 12 * * *"        # daily, 6–7 AM Chicago time (the city posts ~4:10 AM)
   push:
-    branches: [main, dev]       # dev: build + test only, never deployed
+    branches: [main, dev]
   workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: "Deploy even if some inspections still lack AI summaries (main only)"
+        type: boolean
+        default: false
 
 permissions:
-  contents: read
+  contents: write                # commit new AI summaries back to main
   pages: write
   id-token: write
 
@@ -19,7 +30,12 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
+    outputs:
+      deploy: ${{ steps.decide.outputs.deploy }}
+    env:
+      IS_MAIN: ${{ github.ref == 'refs/heads/main' }}
+      HAS_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,20 +46,59 @@ jobs:
         with:
           node-version: "22"
       - run: pip install -r requirements.txt
-      - name: Rebuild site data from the city API
+
+      - name: Install Claude Code (for AI summaries)
+        id: ai
+        if: env.HAS_TOKEN == 'true' && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
+        run: npm install -g @anthropic-ai/claude-code && echo "run=1" >> "$GITHUB_OUTPUT"
+
+      - name: Rebuild site data (pull, model, summaries, gate)
+        id: build
+        env:
+          RUN_AI: ${{ steps.ai.outputs.run || '0' }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: scripts/build.sh
+
       - name: Search tests
         run: node tests/search.test.mjs
+
+      - name: Save new AI summaries to main
+        if: env.IS_MAIN == 'true'
+        run: |
+          if git diff --quiet -- summaries/summaries.jsonl; then echo "no new AI summaries"; exit 0; fi
+          n=$(git diff --numstat -- summaries/summaries.jsonl | cut -f1)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add summaries/summaries.jsonl
+          git commit -m "Summaries: +$n new inspections (daily job)"
+          git pull --rebase origin main && git push origin HEAD:main
+
+      - name: Decide
+        id: decide
+        run: |
+          d="${{ steps.build.outputs.deploy }}"
+          if [ "${{ inputs.force_deploy }}" = "true" ]; then d=true; fi
+          if [ "$IS_MAIN" != "true" ]; then d=false; fi
+          echo "deploy=$d" >> "$GITHUB_OUTPUT"
+          echo "### Deploy: $d (inspections waiting for AI summary: ${{ steps.build.outputs.pending }})" >> "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/configure-pages@v5
-        if: github.ref == 'refs/heads/main'
+        if: steps.decide.outputs.deploy == 'true'
       - uses: actions/upload-pages-artifact@v3
-        if: github.ref == 'refs/heads/main'
+        if: steps.decide.outputs.deploy == 'true'
         with:
           path: site
+      - name: Keep held build as a preview
+        if: steps.decide.outputs.deploy != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-preview
+          path: site
+          retention-days: 7
 
   deploy:
     needs: build
-    if: github.ref == 'refs/heads/main'
+    if: needs.build.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

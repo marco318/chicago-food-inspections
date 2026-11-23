@@ -267,7 +267,9 @@ async function renderInspection(id, iid) {
     <h1>${fmtDate(i.d)} ${pill(i.res)}</h1>
     <div class="muted small">${esc(i.ty)}${i.c ? " · triggered by a complaint" : ""} · Inspection #${i.id}</div>
     ${i.s ? `<div class="card"><strong>${esc(i.h)}</strong><p>${esc(i.s)}</p>
-      <div class="ai">Summary written by AI from the inspector's notes below. The notes are the official record.</div></div>` : ""}
+      <div class="ai">${i.src === "r"
+        ? "Automatic summary from the violation codes below; a fuller summary is on the way. The notes are the official record."
+        : "Summary written by AI from the inspector's notes below. The notes are the official record."}</div></div>` : ""}
     ${i.v ? `<h2>Violations (${i.v.length})</h2><div class="card">${i.v.map(([n, title, sev, comment]) => `
       <div class="vio">
         <div class="head"><span>#${n} ${esc(title)}</span><span class="sev ${sev}">${SEV[sev] || ""}</span></div>

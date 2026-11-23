@@ -22,6 +22,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from rules import CLOSURE, PEST_SEEN, PLAIN, pest_phrase, severity
+
 D, OUT = Path(sys.argv[1]), Path(sys.argv[2])
 (OUT / "places").mkdir(parents=True, exist_ok=True)
 SHARDS = 128
@@ -90,18 +92,12 @@ def title_case(s: str) -> str:
 
 # ---------- severity ----------
 c = vio.comment.fillna("").str.upper()
-sev = pd.Series(pd.NA, index=vio.index, dtype="object")
-sev[c.str.contains(r"\bCORE\b")] = "core"
-sev[c.str.contains(r"PRIORITY\s+FOUNDATION|\bPF\b")] = "priority_foundation"
-sev[c.str.contains(r"PRIORITY\s+VIOLATION|PRIORITY\.|PRIORITY\s*\(P\)|\(P\)") & ~c.str.contains(r"PRIORITY\s+FOUNDATION")] = "priority"
-vio["sev"] = sev.fillna(vio.number.map(lambda n: "risk_factor" if n <= 29 else "upkeep"))
+vio["sev"] = severity(vio)
 
 # pests per inspection = AI flag OR pest evidence in the inspector's #38 notes (same rule as 09_merge_summaries)
-PEST_SEEN = r"DROPPING|\bLIVE\b|\bDEAD\b|CARCASS|INFEST|ROACHES|\bGNATS\b|\bFLIES\b|NESTING|GNAWED|RUB MARKS"
 pest_ids = set(vio[(vio.number == 38) & c.str.contains(PEST_SEEN, regex=True)].inspection_id)
 if "pests" in summ:
     pest_ids |= set(summ[summ.pests.astype(bool)].inspection_id)
-CLOSURE = r"SUMMARILY SUSPENDED|SUMMARY SUSPENSION|LICENSE (?:WAS |IS )?SUSPENDED|CEASE AND DESIST|CLOSED BY|ESTABLISHMENT CLOSED|CLOSURE"
 closure_ids = set(vio[c.str.contains(CLOSURE, regex=True)].inspection_id)
 priority_ids = set(vio[vio.sev.eq("priority")].inspection_id)
 
@@ -145,6 +141,8 @@ for pid, g in ins.sort_values("inspection_date", ascending=False).groupby("place
         if r.inspection_id in summ.index:
             s = summ.loc[r.inspection_id]
             item.update({"h": s.headline, "s": s.summary, "pests": bool(s.pests)})
+            if s.get("src") == "rule":
+                item["src"] = "r"
         vg = vio_by.get(r.inspection_id)
         if vg is not None:
             item["v"] = [[int(x.number), title_case(x.title), x.sev, x.comment if isinstance(x.comment, str) else ""]
@@ -167,32 +165,6 @@ for pid, g in ins.sort_values("inspection_date", ascending=False).groupby("place
 RANK = {"poison": 0, "closure": 1, "pests": 2, "priority": 3, "fail": 4, "fixed": 5}
 FALLBACK = {"poison": "Suspected food poisoning check", "closure": "Closure or suspension noted",
             "pests": "Signs of pests found", "fixed": "Fixed: passed re-inspection"}
-# Plain words for the violations that most often drive a fail (used when there's no AI summary yet).
-PLAIN = {1: "No one in charge knew food safety rules", 2: "No certified food manager on site",
-         3: "Sick-worker policy missing", 5: "No plan for vomit/diarrhea cleanup", 8: "Hands not washed properly",
-         9: "Bare-hand contact with ready-to-eat food", 10: "Hand sink not usable or stocked",
-         11: "Food from an unapproved source", 13: "Raw and ready-to-eat food not kept apart",
-         16: "Dishes or surfaces not properly sanitized", 18: "Food not cooled properly",
-         19: "Food not reheated properly", 20: "Hot food not kept hot enough", 21: "Hot food not kept hot enough",
-         22: "Cold food not kept cold enough", 23: "Food missing discard dates", 25: "Consumer advisory missing",
-         29: "Special process without approval", 33: "Food not thawed or cooled correctly",
-         36: "Thermometers missing", 37: "Food not labeled", 38: "Pest problems", 39: "Food not protected from contamination",
-         47: "Equipment in poor repair", 48: "Dishwashing setup not working right",
-         59: "Earlier problems not fixed", 60: "Earlier problems not fixed", 61: "Earlier problems not fixed", 49: "Surfaces not clean", 51: "Plumbing problems", 55: "Facility not clean or maintained"}
-
-
-def pest_phrase(text: str) -> str:
-    t = text.upper()
-    what = []
-    if re.search(r"ROACH", t): what.append("roaches")
-    if re.search(r"\bMICE\b|\bMOUSE\b|RODENT DROPP|MICE DROPP|MOUSE DROPP", t): what.append("mouse droppings" if "DROPP" in t else "mice")
-    elif re.search(r"\bRATS?\b", t): what.append("rats")
-    if re.search(r"\bFLIES\b|\bFLY\b|GNAT", t): what.append("flies")
-    if not what: return "Signs of pests found"
-    s = " and ".join(what[:2])
-    return (s[0].upper() + s[1:] + " found")
-
-
 by_id = {r["id"]: r for r in index}
 real = ins[ins.is_inspection & ins.place_id.isin(by_id)].sort_values(["place_id", "inspection_date", "inspection_id"])
 real["prev_res"] = real.groupby("place_id").results.shift(1)
@@ -254,7 +226,7 @@ for k, sh in enumerate(shards):
 meta = {"data_through": ins.inspection_date.max().strftime("%Y-%m-%d"),
         "window_start": ins.inspection_date.min().strftime("%Y-%m-%d"),
         "places": len(index), "flagged": sum("flag" in r for r in index),
-        "summarized": int(len(summ)), "inspections": int(len(ins)), "shards": SHARDS,
+        "summarized": int(len(summ)), "ai_summarized": int((summ.get("src", pd.Series("ai", index=summ.index)) == "ai").sum()), "inspections": int(len(ins)), "shards": SHARDS,
         "posted_through": real.posted.max().strftime("%Y-%m-%d"), "feed": len(feed)}
 (OUT / "meta.json").write_text(json.dumps(meta, indent=1))
 
