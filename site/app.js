@@ -18,7 +18,7 @@ const feedbackLink = (p, text) => `<a href="${esc(feedbackUrl(p))}" target="_bla
 
 // Usage counting (GoatCounter: no cookies, no personal data). Empty -> nothing is sent.
 // Counts page views per route and a few events; never sends what people type into search.
-const GOATCOUNTER = "https://myunghoonkim.goatcounter.com/count";
+const GOATCOUNTER = "https://theneighborchi.goatcounter.com/count";
 if (GOATCOUNTER && !/^(localhost|127\.)/.test(location.hostname)) {
   window.goatcounter = { no_onload: true };
   const s = document.createElement("script");
