@@ -7,7 +7,7 @@ const SOURCE = "https://data.cityofchicago.org/Health-Human-Services/Food-Inspec
 // Feedback form (Tally). Hidden fields place_id / place_name / page are pre-filled from the link.
 // Empty -> falls back to GitHub issues.
 const FEEDBACK_FORM = "https://tally.so/r/4a79bo";
-const ISSUES = "https://github.com/marco318/chicago-food-inspections/issues/new";
+const ISSUES = "https://github.com/marco318/food/issues/new";
 const feedbackUrl = (p = null) => {
   if (!FEEDBACK_FORM) return ISSUES;
   const q = new URLSearchParams({ page: location.href });
@@ -296,7 +296,7 @@ function renderAbout() {
     </ul>
     <p>Found a mistake, own a business listed here, or have an idea? ${feedbackLink(null, "Send feedback")}. An email address is optional and only used to reply.</p>
     <p class="small muted">Privacy: no cookies, no accounts. We count anonymous page views and how often search is used (not what you type) to see whether this is useful. "Near me" uses your location only on your device.</p>
-    <p class="small muted">Code and method: <a href="https://github.com/marco318/chicago-food-inspections" target="_blank" rel="noopener">GitHub</a>.</p></div>`;
+    <p class="small muted">Code and method: <a href="https://github.com/marco318/food" target="_blank" rel="noopener">GitHub</a>.</p></div>`;
 }
 
 function notFound() { app.innerHTML = `<a class="back" href="#/">← Search</a><p>That page doesn't exist.</p>`; }

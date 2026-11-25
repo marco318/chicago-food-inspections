@@ -207,7 +207,7 @@ for r in real[real.posted > cut].itertuples():
 feed.sort(key=lambda f: (f["p"], f["fx"] is None, -RANK[f["k"]]), reverse=True)
 (OUT / "feed.json").write_text(json.dumps(feed, separators=(",", ":")))
 
-SITE = os.environ.get("SITE_URL", "https://marco318.github.io/chicago-food-inspections/")
+SITE = os.environ.get("SITE_URL", "https://theneighborchicago.org/food/")
 items = "".join(
     f"<item><title>{xml_escape(f['n'])}: {xml_escape(f['h'])}</title>"
     f"<link>{SITE}#/p/{f['id']}/i/{f['iid']}</link><guid isPermaLink=\"false\">{f['iid']}</guid>"
