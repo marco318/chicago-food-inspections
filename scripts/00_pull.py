@@ -6,6 +6,8 @@ Optional env SOCRATA_APP_TOKEN raises the city's rate limit (not required for on
 import datetime as dt
 import os
 import sys
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -21,8 +23,19 @@ req = urllib.request.Request(f"https://data.cityofchicago.org/resource/4ijn-s7e5
                              headers={"User-Agent": "chicago-food-inspections (open-source static site)"})
 if os.environ.get("SOCRATA_APP_TOKEN"):
     req.add_header("X-App-Token", os.environ["SOCRATA_APP_TOKEN"])
-with urllib.request.urlopen(req, timeout=300) as r:
-    data = r.read()
+# The city API sometimes returns 503/429 for a few minutes; retry with backoff (~15 min total) before failing.
+for attempt in range(6):
+    try:
+        with urllib.request.urlopen(req, timeout=300) as r:
+            data = r.read()
+        break
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as e:
+        code = getattr(e, "code", None)
+        if attempt == 5 or (code is not None and code not in (429, 500, 502, 503, 504)):
+            raise
+        wait = 30 * 2 ** attempt if attempt < 4 else 300
+        print(f"city API error ({code or e}); retrying in {wait}s", flush=True)
+        time.sleep(wait)
 out.write_bytes(data)
 rows = data.count(b"\n") - 1
 print(f"pulled {len(data)/1e6:.1f} MB since {start} ({rows}+ lines incl. multi-line fields) -> {out}")
