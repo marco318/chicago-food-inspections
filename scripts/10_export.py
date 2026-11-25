@@ -124,7 +124,7 @@ for r in pl.itertuples():
         row["pv"] = title_case(r.previously)
     if isinstance(r.latitude, float) and not math.isnan(r.latitude):
         row["ll"] = [round(r.latitude, 5), round(r.longitude, 5)]
-    if r.flag is True or r.flag == 1:
+    if (r.flag is True or r.flag == 1) and row["open"]:   # no badge on closed places
         row["flag"] = round(float(r.ratio), 1)
     index.append(row)
 
@@ -156,6 +156,7 @@ for pid, g in ins.sort_values("inspection_date", ascending=False).groupby("place
         "expected": round(float(p.expected_complaints), 2) if not pd.isna(p.expected_complaints) else None,
         "years": round(float(p.obs_years), 1),
         "p": float(p.p_surprise) if not pd.isna(p.p_surprise) else None,
+        "lc": p.last_complaint[:10] if isinstance(p.get("last_complaint"), str) else None,   # latest complaint episode
         "insp": rows,
     }
     shards[pid % SHARDS][str(pid)] = detail

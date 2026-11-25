@@ -216,7 +216,12 @@ async function renderPlace(id) {
   const done = d.insp.filter(completed);
   const fails = done.filter((i) => i.res === "Fail").length;
   const latest = done[0];
-  const pct = d.p == null ? "" : d.p < 0.001 ? "less than 0.1%" : d.p < 0.01 ? "less than 1%" : `about ${Math.round(d.p * 100)}%`;
+  // ▲ badge text. Counts are complaint episodes (repeat visits for one complaint count once). Validation numbers
+  // (next-year complaints, routine-fail rate) come from scripts/05_model.py output — update both when the model changes.
+  const period = d.years >= 1 ? `${+d.years.toFixed(1)} years` : `${Math.max(1, Math.round(d.years * 12))} months`;
+  const peers = d.expected == null ? "" : d.expected < 0.5
+    ? "Similar places nearby (same type and risk level, same zip code) usually had none over the same time."
+    : `Similar places nearby (same type and risk level, same zip code) averaged about ${d.expected.toFixed(1)} over the same time, so this is ${p.flag >= 10 ? "more than 10×" : `roughly ${p.flag}×`} as many.`;
   const lst = latest ? status(latest.res, latest.pests || hasPestNotes(latest)) : null;
   const said = latest && (latest.s || (latest.v
     ? [...new Set(latest.v.map((v) => v[1]))].slice(0, 2).join("; ") : "No violations recorded."));
@@ -238,8 +243,8 @@ async function renderPlace(id) {
     ${p.flag ? `
       <details class="quiet">
         <summary>▲ More complaints than similar places nearby <span class="why">Why?</span></summary>
-        <p>${d.complaints} complaint-driven inspections in the last ${d.years} years. Places of the same type and risk level in the same zip code would average about ${d.expected?.toFixed(1)} over that time, so this is roughly ${p.flag}× more.</p>
-        <p>A gap this big happens by chance ${pct} of the time. Complaints are reports from the public: a sign worth checking, not proof of a problem.</p>
+        <p>${d.complaints} complaint${d.complaints === 1 ? "" : "s"} from the public led to an inspection here in the last ${period}${d.lc ? `, most recently ${fmtDate(d.lc)}` : ""}. ${peers}</p>
+        <p>Complaints are reports, not findings: a sign worth checking, not proof of a problem. In past data, places with this badge got about 5× more complaints the following year and failed routine inspections more often (38% vs 23%).</p>
       </details>` : ""}
     <details class="all">
       <summary>All ${d.insp.length} inspections</summary>
@@ -290,7 +295,7 @@ function renderAbout() {
     <ul>
       <li><strong>Data:</strong> every inspection from ${fmtDate(m.window_start)} to ${fmtDate(m.data_through)}, from the <a href="${SOURCE}" target="_blank" rel="noopener">city's open data portal</a>. ${m.places.toLocaleString()} places.</li>
       <li><strong>Summaries:</strong> plain-English summaries are written by AI from the inspector's notes. The notes themselves are always shown and are the official record.</li>
-      <li><strong>The ▲ badge:</strong> marks places with clearly more complaint-driven inspections than similar places (same type and risk level, same zip code), allowing for how long each place has been open. ${m.flagged} places (about 3%). Complaints are reports from the public, not findings; a badge is a reason to look at the record, not proof of a problem. In our check, badged places went on to fail routine inspections somewhat more often (34% vs 23%) and drew more complaints the next year.</li>
+      <li><strong>The ▲ badge:</strong> marks open places with clearly more complaints that led to an inspection than similar places (same type and risk level, same zip code), allowing for how long each place has been open. Repeat visits for the same complaint, and visits where the inspector couldn't get in, count once or not at all. ${m.flagged} places (about 3%). Complaints are reports from the public, not findings; a badge is a reason to look at the record, not proof of a problem. When we fit the model on two years and checked the third, badged places got about 5× more complaints the next year and failed routine inspections more often (38% vs 23%).</li>
       <li><strong>Severity:</strong> labels like "Priority" come from the inspector's notes. When none is written, items 1–29 are shown as "Risk factor" and the rest as "Upkeep".</li>
       <li><strong>Limits:</strong> a new owner with a new license can look like a new opening; a place that changed its name under the same license is shown as a new place.</li>
     </ul>

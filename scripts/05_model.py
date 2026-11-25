@@ -1,4 +1,4 @@
-"""Step 3: negative binomial model of complaint-driven inspections + surprise score + temporal validation.
+"""Step 3: negative binomial model of complaint episodes (completed complaint inspections, visits <=14 days apart merged) + surprise score + temporal validation.
 
 Model: complaints_i ~ NB2(mu_i, alpha),  log mu_i = log(exposure_years_i) + risk + facility group + zip group.
 Surprise score: p_i = P(Y >= y_i | mu_i, alpha). Badge: y_i >= 2 and p_i < 0.05.
@@ -26,6 +26,16 @@ pl = pl[pl.consumer_facing].copy()
 ins = ins[ins.place_id.isin(pl.place_id)]
 WIN_START, WIN_END = ins.inspection_date.min(), ins.inspection_date.max()
 
+# Complaint *episodes*, not visits: inspectors often return several times for one complaint (or can't get in).
+# Count only completed complaint inspections (not No Entry / Not Ready / out of business), and merge visits to the
+# same place within EPISODE_GAP_DAYS of the previous one into one episode.
+EPISODE_GAP_DAYS = 14
+c = ins[ins.is_complaint & ins.is_inspection & ~ins.results.eq("Not Ready")].sort_values(["place_id", "inspection_date"])
+gap = c.groupby("place_id").inspection_date.diff().dt.days
+ins["is_episode"] = False
+ins.loc[c.index[gap.isna() | (gap > EPISODE_GAP_DAYS)], "is_episode"] = True
+print(f"complaint visits {int(ins.is_complaint.sum())} -> completed {len(c)} -> episodes {int(ins.is_episode.sum())}")
+
 
 def type_group(ft: str) -> str:
     ft = str(ft).upper()
@@ -50,7 +60,8 @@ def period_table(start, end):
     w = ins[(ins.inspection_date >= start) & (ins.inspection_date < end)]
     g = w.groupby("place_id")
     t = pl.set_index("place_id")[["display_name", "address", "tg", "risk_n", "zipg", "obs_start", "obs_end"]].copy()
-    t["y"] = g.is_complaint.sum().reindex(t.index).fillna(0).astype(int)
+    t["y"] = g.is_episode.sum().reindex(t.index).fillna(0).astype(int)
+    t["last_complaint"] = w[w.is_episode].groupby("place_id").inspection_date.max().reindex(t.index)
     t["n_insp"] = g.is_inspection.sum().reindex(t.index).fillna(0).astype(int)
     t["any_fail"] = g.is_fail.any().reindex(t.index, fill_value=False)
     canv = w[w.itype.eq("CANVASS") & w.is_inspection]
@@ -93,7 +104,7 @@ p0_po = np.exp(-full.mu).mean()
 print(f"share with 0 complaints: observed {(full.y == 0).mean():.3f} | NB {p0_nb:.3f} | Poisson {p0_po:.3f}")
 print(f"flagged: {int(full.flag.sum())} places ({full.flag.mean():.1%}) | ratio among flagged: median {full[full.flag].ratio.median():.1f}x")
 
-out = full[["place_id", "y", "mu", "expo", "p_surprise", "ratio", "flag"]].rename(columns={"y": "complaints", "mu": "expected_complaints"})
+out = full[["place_id", "y", "mu", "expo", "p_surprise", "ratio", "flag", "last_complaint"]].rename(columns={"y": "complaints", "mu": "expected_complaints"})
 out.to_csv(D / "scores.csv", index=False)
 
 # ---------- 2. temporal validation ----------
@@ -110,6 +121,7 @@ print(f"places with >=1 routine canvass in test year: {len(Vc)} | base canvass-f
 rows = []
 signals = {
     "model flag (y>=2, p<.05)": Vc.flag,
+    "stricter flag (y>=2, p<.01)": (Vc.y >= 2) & (Vc.p_surprise < 0.01),
     "any complaint (raw)": Vc.y >= 1,
     "2+ complaints (raw)": Vc.y >= 2,
     "failed any inspection in A": Vc.fail_A,
@@ -135,4 +147,8 @@ print(f"  {'model + failed in A':32s} {roc_auc_score(Vc.canvass_fail_B, combo):.
 
 print("\nfuture complaints: mean complaints in test year, flagged vs not:",
       round(V[V.flag].y_B.mean(), 3), "vs", round(V[~V.flag].y_B.mean(), 3))
+st = (V.y >= 2) & (V.p_surprise < 0.01)
+print("future complaints, stricter flag vs not:", round(V[st].y_B.mean(), 3), "vs", round(V[~st].y_B.mean(), 3), f"(n={int(st.sum())})")
+fl = Vc[Vc.flag]; ph = fl.canvass_fail_B.mean(); se = (ph * (1 - ph) / max(len(fl), 1)) ** 0.5
+print(f"canvass-fail if flagged: {ph:.1%} (95% CI {ph - 1.96 * se:.1%}-{ph + 1.96 * se:.1%}, n={len(fl)}) vs base {Vc.canvass_fail_B.mean():.1%}")
 V.to_csv(D / "validation.csv", index=False)
