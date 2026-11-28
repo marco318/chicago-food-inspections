@@ -10,7 +10,9 @@ import pandas as pd
 
 # Evidence words, not verbs: "OVER 50 MICE DROPPINGS" has no "observed"; "RODENT TRAP DEVICES" is not evidence.
 PEST_SEEN = r"DROPPING|\bLIVE\b|\bDEAD\b|CARCASS|INFEST|ROACHES|\bGNATS\b|\bFLIES\b|NESTING|GNAWED|RUB MARKS"
-CLOSURE = r"SUMMARILY SUSPENDED|SUMMARY SUSPENSION|LICENSE (?:WAS |IS )?SUSPENDED|CEASE AND DESIST|CLOSED BY|ESTABLISHMENT CLOSED|CLOSURE"
+# Closure = the city actually shut the place or suspended its license. No bare "CLOSURE" or "CLOSED BY": in 3 years of notes
+# those matched ~800 inspections and none was a shutdown ("menu DISCLOSURE", "dumpster LID CLOSURE", "door held CLOSED BY rope").
+CLOSURE = r"SUMMARILY SUSPENDED|SUMMARY SUSPENSION|LICENSE (?:WAS |IS )?SUSPENDED|CEASE AND DESIST|ESTABLISHMENT CLOSED|CLOSED BY (?:THE )?(?:CITY|CDPH|DEPARTMENT|INSPECTOR)"
 SEV_ORDER = {"priority": 0, "priority_foundation": 1, "risk_factor": 2, "core": 3, "upkeep": 4}
 
 # Plain words for each violation number (as a problem found, not the rule's title).
